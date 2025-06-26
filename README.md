@@ -43,6 +43,8 @@ The **Yield Matcha Hook** revolutionizes liquidity provision in volatile memecoi
 
 ### 📋 **Core Components**
 
+![Editor _ Mermaid Chart-2025-06-26-204930](https://github.com/user-attachments/assets/cb46c9a7-8a3f-4a77-9951-01172d380433)
+
 
 
 ### 🔧 **Smart Contract Structure**
