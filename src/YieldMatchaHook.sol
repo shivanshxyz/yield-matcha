@@ -19,45 +19,44 @@ import {IFlaunchManager} from "./interfaces/IFlaunchManager.sol";
 import {ICircleWallet} from "./interfaces/ICircleWallet.sol";
 import {ConversionUtils} from "./libraries/ConversionUtils.sol";
 
-
 contract YieldMatchaHook is BaseHook {
     using PoolIdLibrary for PoolKey;
 
     struct PoolData {
-        bool isActive;                    // Whether yield harvesting is enabled
-        address targetToken;              // The volatile token (typically the memecoin)
-        address stableToken;              // USDC or equivalent stable token
+        bool isActive; // Whether yield harvesting is enabled
+        address targetToken; // The volatile token (typically the memecoin)
+        address stableToken; // USDC or equivalent stable token
         uint256 totalTimeWeightedLiquidity; // Cumulative time-weighted contributions
-        uint256 lastUpdateTimestamp;      // Last time calculations were updated
-        uint256 accumulatedFees;          // Total fees captured for conversion
-        uint128 conversionThreshold;      // Minimum fee amount before conversion
-        address circleWalletAddress;      // Associated Circle Wallet for this pool
+        uint256 lastUpdateTimestamp; // Last time calculations were updated
+        uint256 accumulatedFees; // Total fees captured for conversion
+        uint128 conversionThreshold; // Minimum fee amount before conversion
+        address circleWalletAddress; // Associated Circle Wallet for this pool
     }
 
     struct LPPosition {
-        uint256 liquidityAmount;          // Current liquidity provided
+        uint256 liquidityAmount; // Current liquidity provided
         uint256 timeWeightedContribution; // Accumulated time-weighted value
-        uint256 lastUpdateTimestamp;      // When position was last modified
-        uint256 pendingRewards;           // Unclaimed USDC rewards
-        uint256 totalClaimedRewards;      // Historical reward total
+        uint256 lastUpdateTimestamp; // When position was last modified
+        uint256 pendingRewards; // Unclaimed USDC rewards
+        uint256 totalClaimedRewards; // Historical reward total
     }
 
     struct RewardPool {
-        uint256 totalUSDCReserves;        // Available USDC for distribution
-        uint256 distributionRate;         // USDC per second distribution rate
-        uint256 lastDistributionTime;     // Timestamp of last reward distribution
+        uint256 totalUSDCReserves; // Available USDC for distribution
+        uint256 distributionRate; // USDC per second distribution rate
+        uint256 lastDistributionTime; // Timestamp of last reward distribution
         uint256 rewardPerTimeWeightedUnit; // Current reward rate calculation
     }
 
     struct AutoDistributionConfig {
-    bool enabled;
-    uint256 minimumThreshold;
-    uint256 distributionInterval;
-    uint256 maxRecipientsPerBatch;
-}
+        bool enabled;
+        uint256 minimumThreshold;
+        uint256 distributionInterval;
+        uint256 maxRecipientsPerBatch;
+    }
 
     mapping(PoolId => PoolData) public poolData;
-    
+
     mapping(PoolId => mapping(address => LPPosition)) public lpPositions;
 
     mapping(PoolId => RewardPool) public rewardPools;
@@ -89,16 +88,21 @@ contract YieldMatchaHook is BaseHook {
     event DistributionThresholdReached(PoolId indexed poolId, uint256 pendingAmount);
     event FeeConversionTriggered(PoolId indexed poolId, uint256 feeAmount, uint256 usdcReceived);
     event ConversionThresholdUpdated(PoolId indexed poolId, uint256 newThreshold);
-    event InternalSwapExecuted(PoolId indexed poolId, address fromToken, address toToken, uint256 amountIn, uint256 amountOut);
+    event InternalSwapExecuted(
+        PoolId indexed poolId, address fromToken, address toToken, uint256 amountIn, uint256 amountOut
+    );
 
-    event HookSwap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint128 hookLPfeeAmount0, uint128 hookLPfeeAmount1);
+    event HookSwap(
+        bytes32 indexed id,
+        address indexed sender,
+        int128 amount0,
+        int128 amount1,
+        uint128 hookLPfeeAmount0,
+        uint128 hookLPfeeAmount1
+    );
     event HookFee(bytes32 indexed id, address indexed sender, uint128 feeAmount0, uint128 feeAmount1);
 
-    constructor(
-        IPoolManager _poolManager, 
-        address _usdc, 
-        address _circlePaymaster
-    ) BaseHook(_poolManager) {
+    constructor(IPoolManager _poolManager, address _usdc, address _circlePaymaster) BaseHook(_poolManager) {
         USDC = _usdc;
         circlePaymaster = ICirclePaymaster(_circlePaymaster);
     }
@@ -122,12 +126,12 @@ contract YieldMatchaHook is BaseHook {
         });
     }
 
-    function afterInitialize(
-        address sender,
-        PoolKey calldata key,
-        uint160 sqrtPriceX96,
-        int24 tick
-    ) external override onlyPoolManager returns (bytes4) {
+    function afterInitialize(address sender, PoolKey calldata key, uint160 sqrtPriceX96, int24 tick)
+        external
+        override
+        onlyPoolManager
+        returns (bytes4)
+    {
         PoolId poolId = key.toId();
         emit PoolInitialized(poolId, address(0), address(0));
         return YieldMatchaHook.afterInitialize.selector;
@@ -142,21 +146,21 @@ contract YieldMatchaHook is BaseHook {
         bytes calldata hookData
     ) external override onlyPoolManager returns (bytes4, BalanceDelta) {
         PoolId poolId = key.toId();
-        
+
         // Update time-weighted calculations for existing position
         _updateLPPosition(poolId, sender);
-        
+
         // Record new liquidity addition
         LPPosition storage position = lpPositions[poolId][sender];
         uint256 liquidityDelta = uint256(int256(params.liquidityDelta));
         position.liquidityAmount += liquidityDelta;
         position.lastUpdateTimestamp = block.timestamp;
-        
+
         // Update pool-level tracking
         _updatePoolTimeWeightedTotals(poolId);
-        
+
         emit LiquidityAdded(poolId, sender, liquidityDelta, block.timestamp);
-        
+
         return (YieldMatchaHook.afterAddLiquidity.selector, BalanceDelta.wrap(0));
     }
 
@@ -169,65 +173,63 @@ contract YieldMatchaHook is BaseHook {
         bytes calldata hookData
     ) external override onlyPoolManager returns (bytes4, BalanceDelta) {
         PoolId poolId = key.toId();
-        
+
         // Update time-weighted calculations before removing liquidity
         _updateLPPosition(poolId, sender);
-        
+
         // Calculate and accrue rewards for removed liquidity
         _calculateAndAccrueRewards(poolId, sender);
-        
+
         // Update position data
         LPPosition storage position = lpPositions[poolId][sender];
         uint256 liquidityDelta = uint256(-int256(params.liquidityDelta));
         position.liquidityAmount -= liquidityDelta;
         position.lastUpdateTimestamp = block.timestamp;
-        
+
         // Update pool-level tracking
         _updatePoolTimeWeightedTotals(poolId);
-        
+
         emit LiquidityRemoved(poolId, sender, liquidityDelta, block.timestamp);
-        
+
         return (YieldMatchaHook.afterRemoveLiquidity.selector, BalanceDelta.wrap(0));
     }
 
-    function beforeSwap(
-        address sender,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata hookData
-    ) external override onlyPoolManager returns (bytes4, BeforeSwapDelta, uint24) {
+    function beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        external
+        override
+        onlyPoolManager
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
         PoolId poolId = key.toId();
         PoolData storage pool = poolData[poolId];
-        
+
         if (!pool.isActive) {
             return (YieldMatchaHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
         }
-        
+
         // Calculate expected fee from this swap
         uint256 expectedFee = ConversionUtils.calculateSwapFee(params.amountSpecified, key.fee);
-        
+
         if (expectedFee > 0) {
             // Determine which token the fee will be taken in
             (address feeToken, bool isTargetToken) = ConversionUtils.determineFeeToken(params, key, pool.targetToken);
-            
+
             if (isTargetToken) {
                 // Mark this fee for capture
                 pool.accumulatedFees += expectedFee;
                 emit FeeCaptured(poolId, pool.targetToken, expectedFee);
-                
+
                 // Check if we should trigger conversion
                 uint256 conversionAmount = ConversionUtils.calculateOptimalConversion(
-                    pool.accumulatedFees,
-                    pool.conversionThreshold,
-                    maxSlippage
+                    pool.accumulatedFees, pool.conversionThreshold, maxSlippage
                 );
-                
+
                 if (conversionAmount > 0) {
                     _triggerFeeConversion(poolId, conversionAmount);
                 }
             }
         }
-        
+
         return (YieldMatchaHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
@@ -240,17 +242,17 @@ contract YieldMatchaHook is BaseHook {
     ) external override onlyPoolManager returns (bytes4, int128) {
         PoolId poolId = key.toId();
         PoolData storage pool = poolData[poolId];
-        
+
         if (!pool.isActive) {
             return (YieldMatchaHook.afterSwap.selector, 0);
         }
-        
+
         // Update reward distribution calculations after each swap
         _updateRewardDistribution(poolId);
-        
+
         // Emit standardized events for Flaunch integration
         _emitFlaunchStandardEvents(poolId, sender, delta);
-        
+
         return (YieldMatchaHook.afterSwap.selector, 0);
     }
 
@@ -265,13 +267,13 @@ contract YieldMatchaHook is BaseHook {
         PoolId poolId = key.toId();
         require(poolData[poolId].targetToken == address(0), "Pool already initialized");
         require(address(flaunchManager) != address(0), "Flaunch manager not set");
-        
+
         // Verify this is a Flaunch token
         require(flaunchManager.isFlaunchToken(flaunchTokenAddress), "Not a Flaunch token");
-        
+
         // Register with Flaunch platform
         flaunchManager.registerYieldHarvester(flaunchTokenAddress, address(this));
-        
+
         // Initialize pool data
         poolData[poolId] = PoolData({
             isActive: true,
@@ -283,9 +285,9 @@ contract YieldMatchaHook is BaseHook {
             conversionThreshold: conversionThreshold,
             circleWalletAddress: address(0)
         });
-        
+
         emit PoolInitialized(poolId, flaunchTokenAddress, USDC);
-        
+
         // Then set up Circle wallet
         require(address(circleWallets[poolId]) == address(0), "Wallet already initialized");
 
@@ -311,11 +313,9 @@ contract YieldMatchaHook is BaseHook {
         emit AutoDistributionConfigured(poolId, autoConfig);
     }
 
-    function initializePoolWithFlaunch(
-        PoolKey calldata key,
-        address flaunchTokenAddress,
-        uint128 conversionThreshold
-    ) external {
+    function initializePoolWithFlaunch(PoolKey calldata key, address flaunchTokenAddress, uint128 conversionThreshold)
+        external
+    {
         ICircleProgrammableWallet.WalletConfig memory walletConfig = ICircleProgrammableWallet.WalletConfig({
             owner: msg.sender,
             authorizedSpenders: new address[](0),
@@ -343,93 +343,88 @@ contract YieldMatchaHook is BaseHook {
 
     function checkAndExecuteAutoDistribution(PoolId poolId) external {
         AutoDistributionConfig storage autoConfig = autoDistributionConfigs[poolId];
-        
+
         if (!autoConfig.enabled) return;
-        
+
         RewardPool storage rewards = rewardPools[poolId];
-        
+
         // Check if minimum threshold is met
         if (rewards.totalUSDCReserves < autoConfig.minimumThreshold) return;
-        
+
         // Check if enough time has passed since last distribution
         if (block.timestamp < rewards.lastDistributionTime + autoConfig.distributionInterval) return;
-        
+
         // Get all active LP addresses
         address[] memory activeLPs = _getActiveLPs(poolId);
-        
+
         if (activeLPs.length == 0) return;
-        
+
         emit DistributionThresholdReached(poolId, rewards.totalUSDCReserves);
-        
+
         // Execute automated distribution
         executeRewardDistribution(poolId, activeLPs);
     }
 
-    function executeRewardDistribution(PoolId poolId, address[] memory recipients) public returns (uint256 totalDistributed) {
+    function executeRewardDistribution(PoolId poolId, address[] memory recipients)
+        public
+        returns (uint256 totalDistributed)
+    {
         require(recipients.length > 0, "No recipients specified");
         require(address(circleWallets[poolId]) != address(0), "Circle wallet not initialized");
-        
+
         ICircleProgrammableWallet wallet = circleWallets[poolId];
-        
+
         // Calculate reward amounts for each recipient
         uint256[] memory amounts = new uint256[](recipients.length);
         totalDistributed = 0;
-        
-        for (uint i = 0; i < recipients.length; i++) {
+
+        for (uint256 i = 0; i < recipients.length; i++) {
             // Update LP position before calculating rewards
             _updateLPPosition(poolId, recipients[i]);
-            
+
             amounts[i] = _calculateRewardShare(poolId, recipients[i]);
             totalDistributed += amounts[i];
-            
+
             // Update LP position to reflect pending distribution
             lpPositions[poolId][recipients[i]].pendingRewards = amounts[i];
         }
-        
+
         require(totalDistributed > 0, "No rewards to distribute");
         require(wallet.getUSDCBalance() >= totalDistributed, "Insufficient wallet balance");
-        
+
         // Create and execute distribution batches
         AutoDistributionConfig storage autoConfig = autoDistributionConfigs[poolId];
         uint256 batchSize = DistributionManager.calculateOptimalBatchSize(
             recipients.length,
             300000 // Max gas limit per transaction
         );
-        
+
         if (autoConfig.maxRecipientsPerBatch > 0 && batchSize > autoConfig.maxRecipientsPerBatch) {
             batchSize = autoConfig.maxRecipientsPerBatch;
         }
-        
+
         DistributionManager.DistributionState storage distState = distributionStates[poolId];
-        uint256 numBatches = DistributionManager.createDistributionBatches(
-            distState,
-            recipients,
-            amounts,
-            batchSize
-        );
-        
+        uint256 numBatches = DistributionManager.createDistributionBatches(distState, recipients, amounts, batchSize);
+
         emit RewardDistributionInitiated(poolId, totalDistributed, recipients.length);
-        
+
         // Execute batches
         uint256 successfulBatches = 0;
         for (uint256 i = 0; i < numBatches; i++) {
             bool success = DistributionManager.executeDistributionBatch(
-                distState,
-                distState.batches.length - numBatches + i,
-                wallet,
-                circlePaymaster
+                distState, distState.batches.length - numBatches + i, wallet, circlePaymaster
             );
-            
+
             if (success) {
                 successfulBatches++;
             }
         }
-        
+
         // Update LP positions after successful distribution
         _finalizeDistribution(poolId, recipients, amounts, successfulBatches == numBatches);
-        
+
         emit RewardDistributionCompleted(poolId, totalDistributed, successfulBatches);
-        
+
         return totalDistributed;
     }
 
@@ -447,10 +442,7 @@ contract YieldMatchaHook is BaseHook {
         maxSlippage = newMaxSlippage;
     }
 
-    function updateAutoDistributionConfig(
-        PoolId poolId,
-        AutoDistributionConfig calldata newConfig
-    ) external {
+    function updateAutoDistributionConfig(PoolId poolId, AutoDistributionConfig calldata newConfig) external {
         autoDistributionConfigs[poolId] = newConfig;
         emit AutoDistributionConfigured(poolId, newConfig);
     }
@@ -467,13 +459,13 @@ contract YieldMatchaHook is BaseHook {
 
     function _updateLPPosition(PoolId poolId, address provider) internal {
         LPPosition storage position = lpPositions[poolId][provider];
-        
+
         if (position.liquidityAmount > 0 && position.lastUpdateTimestamp > 0) {
             uint256 timeElapsed = block.timestamp - position.lastUpdateTimestamp;
             position.timeWeightedContribution += position.liquidityAmount * timeElapsed;
             poolData[poolId].totalTimeWeightedLiquidity += position.liquidityAmount * timeElapsed;
         }
-        
+
         position.lastUpdateTimestamp = block.timestamp;
     }
 
@@ -488,16 +480,11 @@ contract YieldMatchaHook is BaseHook {
 
     function _triggerFeeConversion(PoolId poolId, uint256 conversionAmount) internal {
         PoolData storage pool = poolData[poolId];
-        
+
         if (conversionAmount == 0 || conversionAmount > pool.accumulatedFees) return;
-        
-        uint256 usdcReceived = _executeInternalSwap(
-            poolId,
-            pool.targetToken,
-            pool.stableToken,
-            conversionAmount
-        );
-        
+
+        uint256 usdcReceived = _executeInternalSwap(poolId, pool.targetToken, pool.stableToken, conversionAmount);
+
         if (usdcReceived > 0) {
             rewardPools[poolId].totalUSDCReserves += usdcReceived;
             pool.accumulatedFees -= conversionAmount;
@@ -506,12 +493,10 @@ contract YieldMatchaHook is BaseHook {
         }
     }
 
-    function _executeInternalSwap(
-        PoolId poolId,
-        address fromToken,
-        address toToken,
-        uint256 amountIn
-    ) internal returns (uint256 amountOut) {
+    function _executeInternalSwap(PoolId poolId, address fromToken, address toToken, uint256 amountIn)
+        internal
+        returns (uint256 amountOut)
+    {
         // Simplified conversion for testing
         amountOut = (amountIn * 1e2) / 1e6;
         emit InternalSwapExecuted(poolId, fromToken, toToken, amountIn, amountOut);
@@ -521,7 +506,7 @@ contract YieldMatchaHook is BaseHook {
     function _updateRewardDistribution(PoolId poolId) internal {
         RewardPool storage rewards = rewardPools[poolId];
         PoolData storage pool = poolData[poolId];
-        
+
         if (pool.totalTimeWeightedLiquidity > 0 && rewards.totalUSDCReserves > 0) {
             rewards.rewardPerTimeWeightedUnit = rewards.totalUSDCReserves / pool.totalTimeWeightedLiquidity;
             rewards.lastDistributionTime = block.timestamp;
@@ -531,18 +516,18 @@ contract YieldMatchaHook is BaseHook {
     function _calculateRewardShare(PoolId poolId, address provider) internal view returns (uint256) {
         LPPosition storage position = lpPositions[poolId][provider];
         PoolData storage pool = poolData[poolId];
-        
+
         if (pool.totalTimeWeightedLiquidity == 0) return 0;
-        
+
         uint256 currentContribution = position.timeWeightedContribution;
         if (position.liquidityAmount > 0 && position.lastUpdateTimestamp > 0) {
             uint256 timeElapsed = block.timestamp - position.lastUpdateTimestamp;
             currentContribution += position.liquidityAmount * timeElapsed;
         }
-        
+
         RewardPool storage rewards = rewardPools[poolId];
         if (rewards.totalUSDCReserves == 0) return 0;
-        
+
         return (currentContribution * rewards.totalUSDCReserves) / pool.totalTimeWeightedLiquidity;
     }
 
@@ -553,10 +538,10 @@ contract YieldMatchaHook is BaseHook {
         bool allBatchesSuccessful
     ) internal {
         if (!allBatchesSuccessful) return;
-        
+
         RewardPool storage rewards = rewardPools[poolId];
         uint256 totalDistributed = 0;
-        
+
         for (uint256 i = 0; i < recipients.length; i++) {
             LPPosition storage position = lpPositions[poolId][recipients[i]];
             position.pendingRewards = 0;
@@ -564,7 +549,7 @@ contract YieldMatchaHook is BaseHook {
             totalDistributed += amounts[i];
             emit RewardDistributed(poolId, recipients[i], amounts[i]);
         }
-        
+
         rewards.totalUSDCReserves -= totalDistributed;
         rewards.lastDistributionTime = block.timestamp;
     }
@@ -576,7 +561,7 @@ contract YieldMatchaHook is BaseHook {
 
     function _emitFlaunchStandardEvents(PoolId poolId, address sender, BalanceDelta delta) internal {
         emit HookSwap(PoolId.unwrap(poolId), sender, delta.amount0(), delta.amount1(), 0, 0);
-        
+
         PoolData storage pool = poolData[poolId];
         if (pool.accumulatedFees > 0) {
             emit HookFee(PoolId.unwrap(poolId), sender, uint128(pool.accumulatedFees), 0);
@@ -599,42 +584,45 @@ contract YieldMatchaHook is BaseHook {
         return rewardPools[poolId];
     }
 
-    function getDistributionStatus(PoolId poolId) external view returns (
-        uint256 totalReserves,
-        uint256 pendingDistributions,
-        uint256 lastDistributionTime,
-        bool autoDistributionEnabled,
-        uint256 nextAutoDistributionTime
-    ) {
+    function getDistributionStatus(PoolId poolId)
+        external
+        view
+        returns (
+            uint256 totalReserves,
+            uint256 pendingDistributions,
+            uint256 lastDistributionTime,
+            bool autoDistributionEnabled,
+            uint256 nextAutoDistributionTime
+        )
+    {
         RewardPool storage rewards = rewardPools[poolId];
         DistributionManager.DistributionState storage distState = distributionStates[poolId];
         AutoDistributionConfig storage autoConfig = autoDistributionConfigs[poolId];
-        
+
         totalReserves = rewards.totalUSDCReserves;
         pendingDistributions = distState.pendingDistributions;
         lastDistributionTime = rewards.lastDistributionTime;
         autoDistributionEnabled = autoConfig.enabled;
-        
+
         if (autoConfig.enabled) {
             nextAutoDistributionTime = rewards.lastDistributionTime + autoConfig.distributionInterval;
         }
     }
 
-    function getCircleWalletStatus(PoolId poolId) external view returns (
-        address walletAddress,
-        uint256 balance,
-        bool isPaused,
-        uint256 remainingDailyLimit
-    ) {
+    function getCircleWalletStatus(PoolId poolId)
+        external
+        view
+        returns (address walletAddress, uint256 balance, bool isPaused, uint256 remainingDailyLimit)
+    {
         ICircleProgrammableWallet wallet = circleWallets[poolId];
-        
+
         if (address(wallet) == address(0)) {
             return (address(0), 0, false, 0);
         }
-        
+
         walletAddress = address(wallet);
         balance = wallet.getUSDCBalance();
         isPaused = wallet.isPaused();
         remainingDailyLimit = wallet.getRemainingDailyLimit();
     }
-} 
+}
