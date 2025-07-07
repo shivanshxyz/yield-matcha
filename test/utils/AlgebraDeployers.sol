@@ -39,7 +39,7 @@ contract AlgebraDeployers is Test, Deployers {
             )
         );
         factory = new AlgebraFactory(address(poolDeployer));
-        deployCodeTo("AlgebraPoolDeployer", abi.encode(address(factory), address(poolDeployer)), address(poolDeployer));
+        deployCodeTo("AlgebraPoolDeployer", abi.encode(address(factory)), address(poolDeployer));
         vm.stopPrank();
     }
 }
