@@ -25,7 +25,7 @@ contract YieldMatchaPoolEntryPoint is IAlgebraPluginFactory {
         return yieldMatchaAddress;
     }
 
-    function createPool(address tokenA, address tokenB, bytes calldata data) external returns (address customPool) {
+    function createPool(address tokenA, address tokenB, bytes calldata data) external returns (address) {
         return IAlgebraFactory(factory).createPool(tokenA, tokenB, data);
     }
 

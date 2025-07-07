@@ -20,7 +20,7 @@ contract AlgebraDeployers is Test, Deployers {
     AlgebraFactory public factory;
     AlgebraPoolDeployer public poolDeployer;
 
-    function deployFactoryAndPoolDeployer() internal virtual {
+    function deployFreshFactoryAndPoolDeployer() internal virtual {
         vm.startPrank(peripheryDeployer);
         poolDeployer = AlgebraPoolDeployer(
             address(
