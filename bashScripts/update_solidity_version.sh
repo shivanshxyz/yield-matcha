@@ -1,16 +1,8 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
 
-TARGET_VERSION="0.8.24"
+# This script finds all .sol files in the current directory and its subdirectories,
+# and replaces "pragma solidity =0.8.20;" with "pragma solidity ^0.8.20;"
 
-# Only touch first-party sources
-find contracts src test -type f -name "*.sol" | while read -r file; do
-  # use portable sed
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "s/pragma solidity =${TARGET_VERSION};/pragma solidity ^${TARGET_VERSION};/g" "$file"
-  else
-    sed -i "s/pragma solidity =${TARGET_VERSION};/pragma solidity ^${TARGET_VERSION};/g" "$file"
-  fi
-done
-
+find . -type f -name "*.sol" -exec sed -i 's/pragma solidity =0.8.20;/pragma solidity ^0.8.20;/g' {} +
+        
 echo "✅ Solidity pragmas updated to ^${TARGET_VERSION}"
