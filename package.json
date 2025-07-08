@@ -18,10 +18,17 @@
     "@nomicfoundation/hardhat-toolbox": "^6.0.0",
     "hardhat": "^2.25.0"
   },
-  "repository": "git@github.com:JMSBPP/yield-matcha-algebra-integration.git",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/JMSBPP/yield-matcha-algebra-integration.git"
+  },
   "dependencies": {
     "@cryptoalgebra/integral-base-plugin": "^1.2.4",
     "@cryptoalgebra/integral-core": "^1.2.8",
     "@cryptoalgebra/integral-periphery": "^1.2.4"
-  }
+  },
+  "bugs": {
+    "url": "https://github.com/JMSBPP/yield-matcha-algebra-integration/issues"
+  },
+  "homepage": "https://github.com/JMSBPP/yield-matcha-algebra-integration#readme"
 }

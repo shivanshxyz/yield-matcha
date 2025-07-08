@@ -1,4 +1,6 @@
+
 # 🍵 Yield Matcha 
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/JMSBPP/yield-matcha-algebra-integration?utm_source=oss&utm_medium=github&utm_campaign=JMSBPP%2Fyield-matcha-algebra-integration&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
 > **Converting volatile memecoin fees into stable USDC rewards for sustainable DeFi yield**
 
