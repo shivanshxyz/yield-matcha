@@ -1,8 +1,8 @@
 start:
 	$(MAKE) hardhat
-	$(MAKE) sync_solidity_compiler
-
+	forge install
 build:
+	$(MAKE) sync_solidity_compiler
 	forge build
 
 hardhat:
